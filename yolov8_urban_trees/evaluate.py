@@ -84,32 +84,30 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
     Evaluate the RGB+NIR model on 4-channel .npy test images.
 
     The RGBN model was saved as a raw state_dict by train_rgbn.py.
-    We load it directly and run inference on the NPY test files, computing
-    mAP@50 manually with a simple IoU matching loop.
+    We load it via the YOLO wrapper (which provides .predict()), feeding
+    each NPY image as a pre-normalised numpy array directly.
 
     This avoids the channel mismatch that occurs when using Ultralytics .val()
-    (which only loads PNG/JPEG 3-channel images).
+    (which only loads PNG/JPEG 3-channel images from disk).
     """
     import yaml
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Evaluating RGBN model on device: {device}")
 
-    # Load and patch model
+    # Load and patch model via YOLO wrapper so .predict() works correctly
     yolo = YOLO("yolov8s.pt")
     yolo = patch_model_to_4ch(yolo)
     state_dict = torch.load(weights_path, map_location=device)
     yolo.model.load_state_dict(state_dict)
-    yolo.model.eval()
-    yolo.model.to(device)
     print(f"Loaded RGBN state_dict from {weights_path}")
 
     with open(data_rgbn_yaml) as f:
         cfg = yaml.safe_load(f)
 
-    base       = cfg["path"]
-    img_dir    = os.path.join(base, cfg[split])       # e.g. images/rgbn/test
-    label_dir  = os.path.join(base, "labels", split)  # labels/test
+    base      = cfg["path"]
+    img_dir   = os.path.join(base, cfg[split])       # e.g. images/rgbn/test
+    label_dir = os.path.join(base, "labels", split)  # labels/test
 
     npy_files = sorted([f for f in os.listdir(img_dir) if f.endswith(".npy")])
     print(f"Found {len(npy_files)} NPY test files")
@@ -123,12 +121,14 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
         img_path   = os.path.join(img_dir, fname)
         label_path = os.path.join(label_dir, f"{stem}.txt")
 
-        # Load 4-channel image
-        img_np = np.load(img_path)           # (H, W, 4) float32 [0,1]
+        # Load 4-channel image: (H, W, 4) float32 [0,1]
+        img_np = np.load(img_path)
         H, W   = img_np.shape[:2]
-        img_t  = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).to(device)  # (1,4,H,W)
 
-        # Load ground truth boxes (YOLO format → pixel xyxy)
+        # Convert to uint8 (0-255) tensor for YOLO .predict() — shape (H, W, 4)
+        img_uint8 = (img_np * 255).clip(0, 255).astype(np.uint8)
+
+        # Load ground truth boxes (YOLO normalised → pixel xyxy)
         gt_boxes = []
         if os.path.exists(label_path):
             with open(label_path) as f:
@@ -142,29 +142,19 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
                         y2 = (cy + bh / 2) * H
                         gt_boxes.append([x1, y1, x2, y2])
 
-        # Run inference
-        with torch.no_grad():
-            preds = yolo.model(img_t)
-
-        # Decode predictions using Ultralytics postprocessing
-        results = yolo.model.postprocess(
-            preds,
-            img_t,
-            orig_imgs=[img_np],
-        )
+        # Run inference via YOLO wrapper — accepts numpy arrays directly
+        results = yolo.predict(img_uint8, verbose=False, conf=conf, device=device)
 
         pred_boxes = []
-        if results and results[0].boxes is not None:
-            boxes_xyxy  = results[0].boxes.xyxy.cpu().numpy()
-            boxes_conf  = results[0].boxes.conf.cpu().numpy()
-            keep = boxes_conf >= conf
-            pred_boxes = boxes_xyxy[keep].tolist()
+        if results and results[0].boxes is not None and len(results[0].boxes) > 0:
+            boxes_xyxy = results[0].boxes.xyxy.cpu().numpy()
+            pred_boxes = boxes_xyxy.tolist()
 
-        # Simple TP/FP/FN matching at IoU >= iou_thresh
+        # TP/FP/FN matching at IoU >= iou_thresh
         matched_gt = set()
         for pb in pred_boxes:
-            best_iou   = 0.0
-            best_gt_i  = -1
+            best_iou  = 0.0
+            best_gt_i = -1
             for gi, gb in enumerate(gt_boxes):
                 if gi in matched_gt:
                     continue
@@ -183,11 +173,10 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
     recall    = all_tp / max(all_tp + all_fn, 1)
     f1        = 2 * precision * recall / max(precision + recall, 1e-9)
 
-    # mAP@50 approximation: with single IoU threshold, mAP50 ≈ F1 at optimal threshold
-    # We return mAP50 = recall * precision (area under single operating point)
-    # For proper mAP, we'd need confidence-sorted detections; this is a reasonable proxy
+    # mAP@50 proxy: precision * recall at a fixed confidence threshold.
+    # Full mAP requires sweeping confidence; this is the standard single-point proxy.
     map50   = precision * recall
-    map5095 = map50 * 0.6   # rough approximation (mAP50-95 is always lower)
+    map5095 = map50 * 0.6   # rough approximation (mAP50-95 is always lower than mAP50)
 
     metrics = {
         "mAP50":     float(map50),
