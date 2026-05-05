@@ -104,6 +104,7 @@ class RGBNDataset(Dataset):
             "cls":       cls,
             "bboxes":    bboxes,
             "batch_idx": batch_idx,
+            "im_file":   path,   # required by plot_training_samples
         }
 
     @staticmethod
@@ -112,6 +113,7 @@ class RGBNDataset(Dataset):
         imgs      = torch.stack([b["img"]   for b in batch])
         cls       = torch.cat ([b["cls"]    for b in batch])
         bboxes    = torch.cat ([b["bboxes"] for b in batch])
+        im_files  = [b["im_file"] for b in batch]
         # batch_idx: which image in the batch each box belongs to
         batch_idx = torch.cat([
             torch.full((len(b["cls"]),), i, dtype=torch.float32)
@@ -122,6 +124,7 @@ class RGBNDataset(Dataset):
             "cls":       cls,
             "bboxes":    bboxes,
             "batch_idx": batch_idx,
+            "im_file":   im_files,
         }
 
 
@@ -216,7 +219,12 @@ class RGBNDetectionTrainer(DetectionTrainer):
         batch["bboxes"]    = batch["bboxes"].to(device)
         batch["batch_idx"] = batch["batch_idx"].to(device)
         # Do NOT divide by 255 — NPY images are already [0, 1]
+        # (parent would do /255 and break our data)
         return batch
+
+    def plot_training_samples(self, batch, ni):
+        """Skip plotting — our batch uses NPY paths, not standard image files."""
+        pass
 
 
 # ---------------------------------------------------------------------------
