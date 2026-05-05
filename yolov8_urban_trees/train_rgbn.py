@@ -226,6 +226,10 @@ class RGBNDetectionTrainer(DetectionTrainer):
         """Skip plotting — our batch uses NPY paths, not standard image files."""
         pass
 
+    def plot_training_labels(self):
+        """Skip — RGBNDataset has no .labels attribute (not a YOLODataset)."""
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Main
