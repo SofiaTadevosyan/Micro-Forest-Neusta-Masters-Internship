@@ -83,24 +83,19 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
     """
     Evaluate the RGB+NIR model on 4-channel .npy test images.
 
-    The RGBN model was saved as a raw state_dict by train_rgbn.py.
-    We load it via the YOLO wrapper (which provides .predict()), feeding
-    each NPY image as a pre-normalised numpy array directly.
-
-    This avoids the channel mismatch that occurs when using Ultralytics .val()
-    (which only loads PNG/JPEG 3-channel images from disk).
+    Weights are saved in full Ultralytics format by train_rgbn.py (DetectionTrainer).
+    Load with YOLO(weights_path), then patch first Conv2d to 4-channel.
+    Feed each NPY image directly to .predict() as a numpy array.
     """
     import yaml
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Evaluating RGBN model on device: {device}")
 
-    # Load and patch model via YOLO wrapper so .predict() works correctly
-    yolo = YOLO("yolov8s.pt")
+    # Load full Ultralytics checkpoint, then patch to 4-channel
+    yolo = YOLO(weights_path)
     yolo = patch_model_to_4ch(yolo)
-    state_dict = torch.load(weights_path, map_location=device)
-    yolo.model.load_state_dict(state_dict)
-    print(f"Loaded RGBN state_dict from {weights_path}")
+    print(f"Loaded RGBN weights from {weights_path}")
 
     with open(data_rgbn_yaml) as f:
         cfg = yaml.safe_load(f)
