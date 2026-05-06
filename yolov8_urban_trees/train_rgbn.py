@@ -33,10 +33,17 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from ultralytics import YOLO
 from ultralytics.models.yolo.detect import DetectionTrainer
+from torch.utils.data import DataLoader as _DataLoader
+
+
+class _DataLoaderWithReset(_DataLoader):
+    """DataLoader with a no-op reset() so DetectionTrainer._do_train() doesn't crash."""
+    def reset(self):
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +218,7 @@ class RGBNDetectionTrainer(DetectionTrainer):
         """Build DataLoader using RGBNDataset with custom collate_fn."""
         dataset = self.build_dataset(dataset_path, mode, batch_size)
         shuffle = (mode == "train")
-        return DataLoader(
+        return _DataLoaderWithReset(
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
