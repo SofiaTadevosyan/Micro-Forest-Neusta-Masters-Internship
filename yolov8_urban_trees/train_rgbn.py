@@ -37,7 +37,6 @@ from torch.utils.data import Dataset, DataLoader
 
 from ultralytics import YOLO
 from ultralytics.models.yolo.detect import DetectionTrainer
-from ultralytics.data.build import build_dataloader
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +118,21 @@ class RGBNDataset(Dataset):
             torch.full((len(b["cls"]),), i, dtype=torch.float32)
             for i, b in enumerate(batch)
         ])
+        # ori_shape and resized_shape required by DetectionValidator._prepare_batch
+        # All images are 256x256 with no letterboxing (ratio_pad = identity)
+        H, W = imgs.shape[2], imgs.shape[3]
+        ori_shape     = [(H, W)] * len(batch)
+        resized_shape = [(H, W)] * len(batch)
+        ratio_pad     = [((1.0, 1.0), (0.0, 0.0))] * len(batch)
         return {
-            "img":       imgs,
-            "cls":       cls,
-            "bboxes":    bboxes,
-            "batch_idx": batch_idx,
-            "im_file":   im_files,
+            "img":          imgs,
+            "cls":          cls,
+            "bboxes":       bboxes,
+            "batch_idx":    batch_idx,
+            "im_file":      im_files,
+            "ori_shape":    ori_shape,
+            "resized_shape": resized_shape,
+            "ratio_pad":    ratio_pad,
         }
 
 
@@ -202,13 +210,15 @@ class RGBNDetectionTrainer(DetectionTrainer):
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
         """Build DataLoader using RGBNDataset with custom collate_fn."""
         dataset = self.build_dataset(dataset_path, mode, batch_size)
-        shuffle = mode == "train"
-        return build_dataloader(
+        shuffle = (mode == "train")
+        return DataLoader(
             dataset,
-            batch=batch_size,
-            workers=self.args.workers,
+            batch_size=batch_size,
             shuffle=shuffle,
-            rank=rank,
+            num_workers=self.args.workers,
+            collate_fn=RGBNDataset.collate_fn,
+            pin_memory=False,
+            drop_last=(mode == "train"),
         )
 
     def preprocess_batch(self, batch):
