@@ -12,7 +12,7 @@ import streamlit as st
 from ultralytics import YOLO
 from health_analysis import (
     load_rgbn, compute_ndvi, classify_health,
-    draw_health_boxes, health_summary
+    draw_health_boxes, health_summary, parse_filename
 )
 
 # ---------------------------------------------------------------------------
@@ -496,142 +496,295 @@ with tab1:
         unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 2 — Health Analysis (NDVI)
+# TAB 2 — Health Analysis (NDVI) — location-agnostic + temporal comparison
 # ═══════════════════════════════════════════════════════════════════════════
 with tab2:
+    import pandas as pd
 
     st.markdown("""
-    <div style="background:#0d1f0d;border:1px solid #1e3a1e;border-radius:12px;padding:16px 20px;margin-bottom:20px;">
-        <div style="font-size:0.95rem;font-weight:600;color:#7ddb7d;margin-bottom:6px;">What is NDVI Health Analysis?</div>
-        <div style="font-size:0.82rem;color:#5a8a5a;line-height:1.7;">
-        After detecting trees, this tab computes <b style="color:#9ddb9d;">NDVI (Normalized Difference Vegetation Index)</b>
-        for each tree using the Near-Infrared band of the NAIP aerial imagery.<br>
-        NDVI = (NIR − Red) / (NIR + Red) &nbsp;·&nbsp; Range: −1 to +1<br><br>
-        <b style="color:#7ddb7d;">🟢 Healthy</b> &nbsp; NDVI &gt; 0.4 &nbsp;·&nbsp;
-        <b style="color:#ddcc44;">🟡 Moderate</b> &nbsp; NDVI 0.2–0.4 &nbsp;·&nbsp;
-        <b style="color:#dd6644;">🔴 Stressed</b> &nbsp; NDVI &lt; 0.2
+    <div style="background:#0d1f0d;border:1px solid #1e3a1e;border-radius:12px;
+                padding:16px 20px;margin-bottom:20px;">
+        <div style="font-size:0.95rem;font-weight:600;color:#7ddb7d;margin-bottom:6px;">
+            NDVI Tree Health Analysis
+        </div>
+        <div style="font-size:0.82rem;color:#5a8a5a;line-height:1.8;">
+            NDVI = (NIR − Red) / (NIR + Red) &nbsp;·&nbsp;
+            Computed per detected tree from the 4-channel aerial image.<br>
+            <b style="color:#7ddb7d;">🟢 Healthy</b> NDVI &gt; 0.2 &nbsp;·&nbsp;
+            <b style="color:#ddcc44;">🟡 Moderate</b> NDVI 0.0–0.2 &nbsp;·&nbsp;
+            <b style="color:#dd6644;">🔴 Stressed</b> NDVI &lt; 0.0<br>
+            <span style="color:#3a6a3a;font-size:0.78rem;">
+            Upload <b>1 file</b> for health analysis &nbsp;·&nbsp;
+            Upload <b>2 files</b> of the same location (different years) for temporal comparison
+            </span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    col_h1, col_h2 = st.columns([1, 1], gap="large")
+    col_h1, col_h2 = st.columns([1, 2], gap="large")
 
     with col_h1:
-        st.markdown('<div class="section-title">Upload 4-Channel .npy Image</div>', unsafe_allow_html=True)
-        uploaded_npy = st.file_uploader(
-            "Upload NPY",
+        # ── Upload your own files ────────────────────────────────────────────
+        st.markdown('<div class="section-title">Upload Your Aerial Image(s)</div>',
+                    unsafe_allow_html=True)
+        st.markdown("""<div style="font-size:0.75rem;color:#3a6a3a;margin-bottom:8px;">
+            4-channel .npy files (R, G, B, NIR)<br>
+            Name format: <code style="color:#5a8a5a;">city_year_tile.npy</code><br>
+            e.g. <code style="color:#5a8a5a;">toulouse_2026_tile1.npy</code>
+        </div>""", unsafe_allow_html=True)
+
+        uploaded_npys = st.file_uploader(
+            "Upload",
             type=["npy"],
+            accept_multiple_files=True,
             label_visibility="collapsed",
-            help="Upload a .npy file from yolo_dataset/images/rgbn/test/"
+            help="Upload 1 file for health analysis or 2 files for temporal comparison"
         )
 
-        st.markdown('<div class="section-title" style="margin-top:16px;">Or pick a sample</div>', unsafe_allow_html=True)
+        # ── Demo samples ─────────────────────────────────────────────────────
+        st.markdown("""
+        <hr style="border:none;border-top:1px solid #1e3a1e;margin:16px 0 10px 0;">
+        <div style="font-size:0.7rem;font-weight:700;color:#3a6a3a;text-transform:uppercase;
+                    letter-spacing:1px;margin-bottom:4px;">
+            Demo Samples — California NAIP (testing only)
+        </div>
+        <div style="font-size:0.72rem;color:#2a4a2a;margin-bottom:8px;">
+            These are example images from California. For your own site, upload files above.
+        </div>""", unsafe_allow_html=True)
+
+        selected_sample = "— select —"
         if os.path.exists(TEST_DIR_RGBN):
-            npy_files = sorted([f for f in os.listdir(TEST_DIR_RGBN) if f.endswith('.npy')])
+            npy_files    = sorted([f for f in os.listdir(TEST_DIR_RGBN) if f.endswith('.npy')])
             sample_names = [npy_files[i] for i in [0, 20, 50, 80, 120, 150] if i < len(npy_files)]
             selected_sample = st.selectbox(
-                "Sample image",
+                "Demo sample",
                 ["— select —"] + sample_names,
                 label_visibility="collapsed"
             )
-        else:
-            selected_sample = "— select —"
-            st.info("RGBN test directory not found.")
 
+        # ── Temporal demo picker ─────────────────────────────────────────────
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:700;color:#3a6a3a;text-transform:uppercase;
+                    letter-spacing:1px;margin:12px 0 4px 0;">
+            Demo Temporal Comparison
+        </div>
+        <div style="font-size:0.72rem;color:#2a4a2a;margin-bottom:8px;">
+            Pick a location that has images from 2 different years.
+        </div>""", unsafe_allow_html=True)
+
+        # Build list of multi-year pairs from test dir
+        temporal_pairs = {}
+        if os.path.exists(TEST_DIR_RGBN):
+            from collections import defaultdict
+            groups = defaultdict(list)
+            for f in npy_files:
+                meta = parse_filename(f)
+                if meta['year']:
+                    key = f"{meta['city']}_{meta['tile']}"
+                    groups[key].append((meta['year'], f))
+            for k, v in groups.items():
+                if len(v) >= 2:
+                    v_sorted = sorted(v)
+                    temporal_pairs[k] = v_sorted
+
+        pair_labels = ["— select —"] + [
+            f"{k.replace('_', ' ').title()} ({' vs '.join(y for y,_ in v)})"
+            for k, v in temporal_pairs.items()
+        ]
+        selected_pair_label = st.selectbox(
+            "Temporal pair",
+            pair_labels,
+            label_visibility="collapsed"
+        )
+
+    # ── Determine what to analyse ────────────────────────────────────────────
     with col_h2:
-        st.markdown('<div class="section-title">Health Analysis Result</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Results</div>', unsafe_allow_html=True)
 
-        # Determine source: uploaded file or sample
-        rgbn_array = None
-        source_name = None
+        def analyse_single(arr, fname):
+            """Run detection + NDVI on one rgbn array. Returns annotated img + summary + table."""
+            rgb = (arr[:, :, :3] * 255).clip(0, 255).astype(np.uint8)
+            _, _, _, boxes = run_detection(rgb, model, conf_threshold)
+            ndvi_vals      = compute_ndvi(arr, boxes)
+            annotated      = draw_health_boxes(rgb, boxes, ndvi_vals)
+            summ           = health_summary(ndvi_vals)
+            meta           = parse_filename(fname)
+            return annotated, boxes, ndvi_vals, summ, meta
 
-        if uploaded_npy is not None:
-            rgbn_array  = np.load(uploaded_npy).astype(np.float32)
-            if rgbn_array.max() > 1.0:
-                rgbn_array = rgbn_array / 255.0
-            source_name = uploaded_npy.name
-
-        elif selected_sample != "— select —":
-            path = os.path.join(TEST_DIR_RGBN, selected_sample)
-            rgbn_array  = load_rgbn(path)
-            source_name = selected_sample
-
-        if rgbn_array is not None:
-            # RGB preview from first 3 channels
-            rgb_preview = (rgbn_array[:, :, :3] * 255).clip(0, 255).astype(np.uint8)
-
-            with st.spinner("Running detection + NDVI analysis..."):
-                _, _, _, boxes = run_detection(rgb_preview, model, conf_threshold)
-                ndvi_vals = compute_ndvi(rgbn_array, boxes)
-                annotated_health = draw_health_boxes(rgb_preview, boxes, ndvi_vals)
-                summary = health_summary(ndvi_vals)
-
-            st.image(annotated_health,
-                     caption="🟢 Healthy  🟡 Moderate  🔴 Stressed  ·  NDVI values shown per tree",
+        def show_single_result(annotated, boxes, ndvi_vals, summ, meta, label=None):
+            title = label or meta.get('label', '')
+            if title:
+                st.markdown(f"<div style='font-size:0.8rem;color:#5a8a5a;margin-bottom:4px;'>{title}</div>",
+                            unsafe_allow_html=True)
+            st.image(annotated,
+                     caption="🟢 Healthy  🟡 Moderate  🔴 Stressed  · NDVI per tree",
                      use_container_width=True)
-
             if len(boxes) == 0:
-                st.warning("No trees detected. Try lowering the confidence threshold in the sidebar.")
-            else:
-                # Summary cards
-                s1, s2, s3, s4 = st.columns(4)
-                with s1:
-                    st.markdown(f"""<div class="metric-card">
-                        <div class="metric-number">{len(boxes)}</div>
-                        <div class="metric-unit">Trees Detected</div>
-                    </div>""", unsafe_allow_html=True)
-                with s2:
-                    st.markdown(f"""<div class="metric-card">
-                        <div class="metric-number" style="color:#7ddb7d">{summary['pct_healthy']}%</div>
-                        <div class="metric-unit">🟢 Healthy</div>
-                    </div>""", unsafe_allow_html=True)
-                with s3:
-                    st.markdown(f"""<div class="metric-card">
-                        <div class="metric-number" style="color:#ddcc44">{summary['pct_moderate']}%</div>
-                        <div class="metric-unit">🟡 Moderate</div>
-                    </div>""", unsafe_allow_html=True)
-                with s4:
-                    st.markdown(f"""<div class="metric-card">
-                        <div class="metric-number" style="color:#dd6644">{summary['pct_stressed']}%</div>
-                        <div class="metric-unit">🔴 Stressed</div>
-                    </div>""", unsafe_allow_html=True)
+                st.warning("No trees detected. Try lowering the confidence threshold.")
+                return
+            s1, s2, s3, s4 = st.columns(4)
+            with s1:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-number">{len(boxes)}</div>
+                    <div class="metric-unit">Trees</div></div>""", unsafe_allow_html=True)
+            with s2:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-number" style="color:#7ddb7d">{summ['pct_healthy']}%</div>
+                    <div class="metric-unit">🟢 Healthy</div></div>""", unsafe_allow_html=True)
+            with s3:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-number" style="color:#ddcc44">{summ['pct_moderate']}%</div>
+                    <div class="metric-unit">🟡 Moderate</div></div>""", unsafe_allow_html=True)
+            with s4:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-number" style="color:#dd6644">{summ['pct_stressed']}%</div>
+                    <div class="metric-unit">🔴 Stressed</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="background:#0d2b0d;border:1px solid #1e3a1e;border-radius:10px;
+                        padding:10px 14px;margin-top:10px;">
+                <span style="font-size:0.72rem;color:#5a8a5a;text-transform:uppercase;">Mean NDVI</span>
+                <span style="font-size:1.4rem;font-weight:700;color:#7ddb7d;margin-left:12px;">{summ['mean_ndvi']}</span>
+                <span style="font-size:0.75rem;color:#3a6a3a;margin-left:10px;">
+                    min {summ['min_ndvi']} · max {summ['max_ndvi']}</span>
+            </div>""", unsafe_allow_html=True)
 
-                # Mean NDVI bar
+        # ── CASE 1: user uploaded files ──────────────────────────────────────
+        if uploaded_npys and len(uploaded_npys) >= 1:
+            if len(uploaded_npys) == 1:
+                f = uploaded_npys[0]
+                arr = np.load(f).astype(np.float32)
+                if arr.max() > 1.0: arr /= 255.0
+                with st.spinner("Analysing..."):
+                    annotated, boxes, ndvi_vals, summ, meta = analyse_single(arr, f.name)
+                show_single_result(annotated, boxes, ndvi_vals, summ, meta)
+                if boxes:
+                    st.markdown('<div class="section-title" style="margin-top:16px;">Per-Tree Table</div>',
+                                unsafe_allow_html=True)
+                    rows = [{"Tree #": i+1, "NDVI": round(v,3),
+                             "Health": f"{classify_health(v)[1]} {classify_health(v)[0]}"}
+                            for i, v in enumerate(ndvi_vals)]
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+            elif len(uploaded_npys) >= 2:
+                f1, f2 = uploaded_npys[0], uploaded_npys[1]
+                arr1 = np.load(f1).astype(np.float32); arr1 = arr1/255 if arr1.max()>1 else arr1
+                arr2 = np.load(f2).astype(np.float32); arr2 = arr2/255 if arr2.max()>1 else arr2
+                with st.spinner("Running temporal comparison..."):
+                    a1, b1, n1, s1_, m1 = analyse_single(arr1, f1.name)
+                    a2, b2, n2, s2_, m2 = analyse_single(arr2, f2.name)
+                tc1, tc2 = st.columns(2)
+                with tc1: show_single_result(a1, b1, n1, s1_, m1)
+                with tc2: show_single_result(a2, b2, n2, s2_, m2)
+                # Comparison table
+                label_a = m1.get('label', f1.name)
+                label_b = m2.get('label', f2.name)
+                delta_ndvi  = round(s2_['mean_ndvi']  - s1_['mean_ndvi'], 3)
+                delta_h     = s2_['pct_healthy']  - s1_['pct_healthy']
+                delta_s     = s2_['pct_stressed'] - s1_['pct_stressed']
+                delta_trees = len(b2) - len(b1)
+                def arrow(v): return f"+{v} ↑" if v > 0 else (f"{v} ↓" if v < 0 else "0 =")
+                st.markdown('<div class="section-title" style="margin-top:20px;">Temporal Comparison</div>',
+                            unsafe_allow_html=True)
+                cmp_df = pd.DataFrame([
+                    {"Metric": "Mean NDVI",      label_a: s1_['mean_ndvi'],  label_b: s2_['mean_ndvi'],  "Change": arrow(delta_ndvi)},
+                    {"Metric": "% Healthy 🟢",   label_a: f"{s1_['pct_healthy']}%",  label_b: f"{s2_['pct_healthy']}%",  "Change": arrow(delta_h)},
+                    {"Metric": "% Moderate 🟡",  label_a: f"{s1_['pct_moderate']}%", label_b: f"{s2_['pct_moderate']}%", "Change": arrow(s2_['pct_moderate']-s1_['pct_moderate'])},
+                    {"Metric": "% Stressed 🔴",  label_a: f"{s1_['pct_stressed']}%", label_b: f"{s2_['pct_stressed']}%", "Change": arrow(delta_s)},
+                    {"Metric": "Trees Detected", label_a: len(b1),            label_b: len(b2),            "Change": arrow(delta_trees)},
+                ])
+                st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+                # Auto conclusion
+                if delta_ndvi > 0.02:
+                    conclusion = f"Between {label_a} and {label_b}, mean NDVI improved by +{delta_ndvi} — suggesting vegetation recovery."
+                    icon = "🟢"
+                elif delta_ndvi < -0.02:
+                    conclusion = f"Between {label_a} and {label_b}, mean NDVI declined by {delta_ndvi} — suggesting increasing stress."
+                    icon = "🔴"
+                else:
+                    conclusion = f"Between {label_a} and {label_b}, vegetation health remained stable (NDVI change: {delta_ndvi})."
+                    icon = "🟡"
                 st.markdown(f"""
-                <div style="background:#0d2b0d;border:1px solid #1e3a1e;border-radius:10px;
-                            padding:12px 16px;margin-top:12px;">
-                    <div style="font-size:0.72rem;color:#5a8a5a;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-                        Mean NDVI across all detected trees
-                    </div>
-                    <div style="font-size:1.6rem;font-weight:700;color:#7ddb7d;">{summary['mean_ndvi']}</div>
-                    <div style="font-size:0.75rem;color:#3a6a3a;margin-top:2px;">
-                        min {summary['min_ndvi']} &nbsp;·&nbsp; max {summary['max_ndvi']}
-                    </div>
+                <div style="background:#0d2b0d;border:1px solid #2d5a2d;border-radius:10px;
+                            padding:12px 16px;margin-top:8px;font-size:0.85rem;color:#9ddb9d;">
+                    {icon} {conclusion}
                 </div>""", unsafe_allow_html=True)
 
-                # Per-tree table
-                st.markdown('<div class="section-title" style="margin-top:20px;">Per-Tree NDVI Table</div>',
-                            unsafe_allow_html=True)
-                import pandas as pd
-                rows = []
-                for i, (box, ndvi) in enumerate(zip(boxes, ndvi_vals)):
-                    label, emoji, _ = classify_health(ndvi)
-                    rows.append({
-                        "Tree #": i + 1,
-                        "NDVI": round(ndvi, 3),
-                        "Health": f"{emoji} {label}",
-                        "Box (x1,y1,x2,y2)": f"{box[0]},{box[1]},{box[2]},{box[3]}"
-                    })
-                df = pd.DataFrame(rows)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+        # ── CASE 2: demo temporal pair ───────────────────────────────────────
+        elif selected_pair_label != "— select —" and selected_pair_label in pair_labels[1:]:
+            pair_key = list(temporal_pairs.keys())[pair_labels[1:].index(selected_pair_label)]
+            years_files = temporal_pairs[pair_key]
+            arr_list, meta_list, ann_list, box_list2, ndvi_list, sum_list = [], [], [], [], [], []
+            with st.spinner("Running temporal comparison..."):
+                for year, fname in years_files[:2]:
+                    arr = load_rgbn(os.path.join(TEST_DIR_RGBN, fname))
+                    ann, bxs, nvs, smm, mta = analyse_single(arr, fname)
+                    arr_list.append(arr); ann_list.append(ann); box_list2.append(bxs)
+                    ndvi_list.append(nvs); sum_list.append(smm); meta_list.append(mta)
+            tc1, tc2 = st.columns(2)
+            with tc1: show_single_result(ann_list[0], box_list2[0], ndvi_list[0], sum_list[0], meta_list[0])
+            with tc2: show_single_result(ann_list[1], box_list2[1], ndvi_list[1], sum_list[1], meta_list[1])
+            s1_, s2_ = sum_list[0], sum_list[1]
+            b1,  b2  = box_list2[0], box_list2[1]
+            m1,  m2  = meta_list[0], meta_list[1]
+            label_a, label_b = m1['label'], m2['label']
+            delta_ndvi  = round(s2_['mean_ndvi']  - s1_['mean_ndvi'], 3)
+            delta_h     = s2_['pct_healthy']  - s1_['pct_healthy']
+            delta_s     = s2_['pct_stressed'] - s1_['pct_stressed']
+            delta_trees = len(b2) - len(b1)
+            def arrow(v): return f"+{v} ↑" if v > 0 else (f"{v} ↓" if v < 0 else "0 =")
+            st.markdown('<div class="section-title" style="margin-top:20px;">Temporal Comparison</div>',
+                        unsafe_allow_html=True)
+            cmp_df = pd.DataFrame([
+                {"Metric": "Mean NDVI",      label_a: s1_['mean_ndvi'],  label_b: s2_['mean_ndvi'],  "Change": arrow(delta_ndvi)},
+                {"Metric": "% Healthy 🟢",   label_a: f"{s1_['pct_healthy']}%",  label_b: f"{s2_['pct_healthy']}%",  "Change": arrow(delta_h)},
+                {"Metric": "% Moderate 🟡",  label_a: f"{s1_['pct_moderate']}%", label_b: f"{s2_['pct_moderate']}%", "Change": arrow(s2_['pct_moderate']-s1_['pct_moderate'])},
+                {"Metric": "% Stressed 🔴",  label_a: f"{s1_['pct_stressed']}%", label_b: f"{s2_['pct_stressed']}%", "Change": arrow(delta_s)},
+                {"Metric": "Trees Detected", label_a: len(b1),            label_b: len(b2),            "Change": arrow(delta_trees)},
+            ])
+            st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+            st.markdown('<div style="font-size:0.72rem;color:#2a4a2a;margin-top:4px;">Demo data — California NAIP dataset</div>',
+                        unsafe_allow_html=True)
+            if delta_ndvi > 0.02:
+                conclusion = f"Between {label_a} and {label_b}, mean NDVI improved by +{delta_ndvi} — suggesting vegetation recovery."
+                icon = "🟢"
+            elif delta_ndvi < -0.02:
+                conclusion = f"Between {label_a} and {label_b}, mean NDVI declined by {delta_ndvi} — suggesting increasing stress."
+                icon = "🔴"
+            else:
+                conclusion = f"Between {label_a} and {label_b}, vegetation health remained stable (NDVI change: {delta_ndvi})."
+                icon = "🟡"
+            st.markdown(f"""
+            <div style="background:#0d2b0d;border:1px solid #2d5a2d;border-radius:10px;
+                        padding:12px 16px;margin-top:8px;font-size:0.85rem;color:#9ddb9d;">
+                {icon} {conclusion}
+            </div>""", unsafe_allow_html=True)
 
+        # ── CASE 3: demo single sample ───────────────────────────────────────
+        elif selected_sample != "— select —":
+            arr = load_rgbn(os.path.join(TEST_DIR_RGBN, selected_sample))
+            with st.spinner("Analysing..."):
+                annotated, boxes, ndvi_vals, summ, meta = analyse_single(arr, selected_sample)
+            show_single_result(annotated, boxes, ndvi_vals, summ, meta)
+            st.markdown('<div style="font-size:0.72rem;color:#2a4a2a;margin-top:8px;">Demo data — California NAIP dataset</div>',
+                        unsafe_allow_html=True)
+            if boxes:
+                st.markdown('<div class="section-title" style="margin-top:16px;">Per-Tree Table</div>',
+                            unsafe_allow_html=True)
+                rows = [{"Tree #": i+1, "NDVI": round(v,3),
+                         "Health": f"{classify_health(v)[1]} {classify_health(v)[0]}"}
+                        for i, v in enumerate(ndvi_vals)]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # ── Empty state ──────────────────────────────────────────────────────
         else:
             st.markdown("""
             <div style="background:#0d1f0d;border:1px solid #1e3a1e;border-radius:16px;
                         padding:60px 20px;text-align:center;">
                 <div style="font-size:3rem;margin-bottom:12px;">🌿</div>
-                <div style="color:#3a6a3a;font-size:1rem;font-weight:500;">Upload a .npy file or select a sample</div>
+                <div style="color:#3a6a3a;font-size:1rem;font-weight:500;">
+                    Upload a .npy file or select a demo sample
+                </div>
                 <div style="color:#2a4a2a;font-size:0.82rem;margin-top:6px;">
-                    Files are in: yolo_dataset/images/rgbn/test/
+                    1 file → health analysis &nbsp;·&nbsp; 2 files → temporal comparison
                 </div>
             </div>""", unsafe_allow_html=True)

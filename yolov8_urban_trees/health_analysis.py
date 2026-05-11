@@ -128,6 +128,34 @@ def draw_health_boxes(img_rgb: np.ndarray, boxes: list, ndvi_values: list) -> np
     return cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
 
 
+def parse_filename(fname: str) -> dict:
+    """
+    Extract city, year, tile from a .npy filename.
+    Expected: <city>_<year>_<tile>.npy  e.g. chico_2018_12.npy
+    Multi-word cities also work: long_beach_2020_98.npy
+    Falls back gracefully if format doesn't match.
+    Returns: {'city': str, 'year': str, 'tile': str, 'label': str}
+    """
+    stem = fname.replace('.npy', '').replace('.NPY', '')
+    parts = stem.split('_')
+    year = tile = city_raw = ''
+    for i, p in enumerate(parts):
+        if len(p) == 4 and p.isdigit():
+            year     = p
+            tile     = '_'.join(parts[i+1:]) if i + 1 < len(parts) else ''
+            city_raw = ' '.join(parts[:i]).title()
+            break
+    if not year:
+        city_raw = stem.title()
+    label = f"{city_raw} {year}".strip() if year else stem
+    return {
+        'city':  city_raw.lower().replace(' ', '_'),
+        'year':  year,
+        'tile':  tile,
+        'label': label,
+    }
+
+
 def health_summary(ndvi_values: list) -> dict:
     """
     Compute aggregate health statistics.
