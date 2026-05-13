@@ -82,10 +82,27 @@ section[data-testid="stSidebarCollapsedControl"] {
 .metric-card      { flex:1; background:linear-gradient(135deg,#c4d8c4,#b8d0b8); border:1px solid #7aa07a; border-radius:12px; padding:16px; text-align:center; }
 .metric-number    { font-size:2rem; font-weight:700; color:#1a5a1a; line-height:1; white-space:nowrap; }
 .metric-unit      { font-size:0.75rem; color:#2a5a2a; margin-top:6px; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; }
-.section-title    { font-size:0.8rem; font-weight:600; color:#2a5a2a; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; white-space:nowrap; }
+.section-title    { font-size:0.8rem; font-weight:600; color:#4a9a4a; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; white-space:nowrap; }
 .divider          { border:none; border-top:1px solid #7aa07a; margin:28px 0; }
 
 [data-testid="stFileUploaderDropzone"] { background:#c8dfc8 !important; border:2px dashed #4a8a4a !important; border-radius:12px !important; }
+
+/* Selectbox styling */
+[data-testid="stSelectbox"] > div > div {
+    background: #c8dfc8 !important;
+    border: 1.5px solid #4a8a4a !important;
+    border-radius: 8px !important;
+    color: #1a3a1a !important;
+}
+[data-testid="stSelectbox"] > div > div:hover {
+    border-color: #2d7a2d !important;
+    background: #b8d4b8 !important;
+}
+[data-testid="stSelectbox"] > div > div > div,
+[data-testid="stSelectbox"] span {
+    color: #1a3a1a !important;
+}
+[data-testid="stSelectbox"] svg { fill: #2a5a2a !important; }
 
 /* Deploy button — matches YOLOv8s · RGB badge style */
 [data-testid="stToolbarActionButton"],
