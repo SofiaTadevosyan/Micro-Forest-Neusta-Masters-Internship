@@ -83,25 +83,28 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
     """
     Evaluate the RGB+NIR model on 4-channel .npy test images.
 
-    Weights are saved in full Ultralytics format by train_rgbn.py (DetectionTrainer).
-    Load with YOLO(weights_path), then patch first Conv2d to 4-channel.
-    Feed each NPY image directly to .predict() as a numpy array.
+    Bypasses YOLO.predict() (which strips to 3 channels internally) and runs
+    the underlying nn.Module directly with a 4-channel float32 tensor.
+    NMS is applied manually using torchvision.
     """
     import yaml
+    from torchvision.ops import nms as tv_nms
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Evaluating RGBN model on device: {device}")
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
+    print(f"Evaluating RGBN model on device: {device_str}")
 
-    # Weights already have 4-channel first conv (patched during training) — load directly
+    # Load weights — first conv is already 4-channel from training
     yolo = YOLO(weights_path)
+    nn_model = yolo.model.eval().to(device)
     print(f"Loaded RGBN weights from {weights_path}")
 
     with open(data_rgbn_yaml) as f:
         cfg = yaml.safe_load(f)
 
     base      = cfg["path"]
-    img_dir   = os.path.join(base, cfg[split])       # e.g. images/rgbn/test
-    label_dir = os.path.join(base, "labels", split)  # labels/test
+    img_dir   = os.path.join(base, cfg[split])
+    label_dir = os.path.join(base, "labels", split)
 
     npy_files = sorted([f for f in os.listdir(img_dir) if f.endswith(".npy")])
     print(f"Found {len(npy_files)} NPY test files")
@@ -119,9 +122,6 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
         img_np = np.load(img_path)
         H, W   = img_np.shape[:2]
 
-        # Convert to uint8 (0-255) tensor for YOLO .predict() — shape (H, W, 4)
-        img_uint8 = (img_np * 255).clip(0, 255).astype(np.uint8)
-
         # Load ground truth boxes (YOLO normalised → pixel xyxy)
         gt_boxes = []
         if os.path.exists(label_path):
@@ -136,13 +136,29 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
                         y2 = (cy + bh / 2) * H
                         gt_boxes.append([x1, y1, x2, y2])
 
-        # Run inference via YOLO wrapper — accepts numpy arrays directly
-        results = yolo.predict(img_uint8, verbose=False, conf=conf, device=device)
+        # Run direct inference — (1, 4, H, W) tensor bypasses YOLO's 3-ch pipeline
+        t = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float().to(device)
+        with torch.no_grad():
+            raw = nn_model(t)
+
+        # raw[0]: (1, 5, num_anchors) — cx, cy, w, h, score in pixel space
+        pred = raw[0][0].T          # (num_anchors, 5)
+        scores = pred[:, 4]
+        mask   = scores >= conf
+        pred   = pred[mask]
 
         pred_boxes = []
-        if results and results[0].boxes is not None and len(results[0].boxes) > 0:
-            boxes_xyxy = results[0].boxes.xyxy.cpu().numpy()
-            pred_boxes = boxes_xyxy.tolist()
+        if len(pred) > 0:
+            cx = pred[:, 0]; cy = pred[:, 1]
+            bw = pred[:, 2]; bh = pred[:, 3]
+            sc = pred[:, 4]
+            boxes_t = torch.stack(
+                [cx - bw/2, cy - bh/2, cx + bw/2, cy + bh/2], dim=1
+            )
+            boxes_t[:, 0::2] = boxes_t[:, 0::2].clamp(0, W)
+            boxes_t[:, 1::2] = boxes_t[:, 1::2].clamp(0, H)
+            keep = tv_nms(boxes_t, sc, iou_threshold=0.45)
+            pred_boxes = boxes_t[keep].cpu().numpy().tolist()
 
         # TP/FP/FN matching at IoU >= iou_thresh
         matched_gt = set()
