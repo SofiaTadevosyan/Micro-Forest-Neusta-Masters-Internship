@@ -189,9 +189,11 @@ class RGBNValidator(DetectionValidator):
     def preprocess(self, batch):
         """Images are already float32 [0,1] — move to device and match model dtype."""
         device = self.device
-        # Cast img to match model dtype (model may be float16 during val)
-        model_dtype = next(self.model.parameters()).dtype
-        batch["img"]       = batch["img"].to(device, non_blocking=True).to(model_dtype)
+        img = batch["img"].to(device, non_blocking=True)
+        # Match model dtype (Ultralytics uses float16 during validation)
+        if self.args.half and device.type != "cpu":
+            img = img.half()
+        batch["img"]       = img
         batch["cls"]       = batch["cls"].to(device)
         batch["bboxes"]    = batch["bboxes"].to(device)
         batch["batch_idx"] = batch["batch_idx"].to(device)
