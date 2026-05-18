@@ -332,6 +332,9 @@ def main():
         "plots":    True,
         "save":     True,
         "verbose":  True,
+        # Disable post-training final validation — it loads saved .pt as 3-ch
+        # which crashes on our 4-ch model. evaluate.py handles evaluation separately.
+        "val":      False,
     })
 
     trainer.train()
