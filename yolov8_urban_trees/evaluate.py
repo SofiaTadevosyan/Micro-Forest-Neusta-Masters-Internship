@@ -92,9 +92,8 @@ def evaluate_rgbn_model(weights_path, data_rgbn_yaml, split="test", conf=0.25, i
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Evaluating RGBN model on device: {device}")
 
-    # Load full Ultralytics checkpoint, then patch to 4-channel
+    # Weights already have 4-channel first conv (patched during training) — load directly
     yolo = YOLO(weights_path)
-    yolo = patch_model_to_4ch(yolo)
     print(f"Loaded RGBN weights from {weights_path}")
 
     with open(data_rgbn_yaml) as f:
