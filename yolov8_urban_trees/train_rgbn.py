@@ -36,7 +36,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 
 from ultralytics import YOLO
-from ultralytics.models.yolo.detect import DetectionTrainer
+from ultralytics.models.yolo.detect import DetectionTrainer, DetectionValidator
 from torch.utils.data import DataLoader as _DataLoader
 
 
@@ -173,6 +173,36 @@ def patch_model_to_4ch(model):
 
 
 # ---------------------------------------------------------------------------
+# Validator subclass — uses 4-channel dataloader so val metrics are correct
+# ---------------------------------------------------------------------------
+
+class RGBNValidator(DetectionValidator):
+    """DetectionValidator that receives a pre-built 4-channel dataloader."""
+
+    def __init__(self, dataloader, save_dir, args, _callbacks=None):
+        super().__init__(dataloader=dataloader, save_dir=save_dir, args=args, _callbacks=_callbacks)
+        self._rgbn_dataloader = dataloader
+
+    def get_dataloader(self, dataset_path, batch_size):
+        return self._rgbn_dataloader
+
+    def preprocess(self, batch):
+        """Images are already float32 [0,1] — skip /255 that parent applies."""
+        device = self.device
+        batch["img"]       = batch["img"].to(device, non_blocking=True)
+        batch["cls"]       = batch["cls"].to(device)
+        batch["bboxes"]    = batch["bboxes"].to(device)
+        batch["batch_idx"] = batch["batch_idx"].to(device)
+        return batch
+
+    def plot_val_samples(self, batch, ni):
+        pass
+
+    def plot_predictions(self, batch, preds, ni):
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Trainer subclass — injects 4-channel support into full Ultralytics pipeline
 # ---------------------------------------------------------------------------
 
@@ -238,6 +268,19 @@ class RGBNDetectionTrainer(DetectionTrainer):
         # Do NOT divide by 255 — NPY images are already [0, 1]
         # (parent would do /255 and break our data)
         return batch
+
+    def get_validator(self):
+        """Return a DetectionValidator that uses our 4-channel RGBN dataloader."""
+        from copy import copy
+        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+        val_path = self.data.get("val") or self.data.get("test")
+        val_loader = self.get_dataloader(val_path, batch_size=self.batch_size * 2, rank=-1, mode="val")
+        return RGBNValidator(
+            dataloader=val_loader,
+            save_dir=self.save_dir,
+            args=copy(self.args),
+            _callbacks=self.callbacks,
+        )
 
     def plot_training_samples(self, batch, ni):
         """Skip plotting — our batch uses NPY paths, not standard image files."""
