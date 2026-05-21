@@ -199,28 +199,28 @@ st.markdown("""
         <div class="page-header-icon">🌳</div>
         <div>
             <div class="page-header-title">Urban Micro-Forest Tree Detection</div>
-            <div class="page-header-sub">YOLOv8 · NDVI Health Analysis · NEUSTA Monitoring System</div>
+            <div class="page-header-sub">YOLOv8s RGB baseline · RGB+NIR mean-initialisation · NDVI Health Analysis · NEUSTA</div>
         </div>
     </div>
     <div class="page-header-stats">
         <div class="page-header-stat">
-            <div class="page-header-stat-value">0.439</div>
-            <div class="page-header-stat-label">mAP@50</div>
+            <div class="page-header-stat-value">0.731</div>
+            <div class="page-header-stat-label">mAP@50 · RGB</div>
         </div>
         <div class="page-header-stat">
-            <div class="page-header-stat-value">77.3%</div>
-            <div class="page-header-stat-label">Recall</div>
+            <div class="page-header-stat-value">67.2%</div>
+            <div class="page-header-stat-label">Recall · RGB</div>
         </div>
         <div class="page-header-stat">
-            <div class="page-header-stat-value">56.7%</div>
-            <div class="page-header-stat-label">Precision</div>
+            <div class="page-header-stat-value">70.9%</div>
+            <div class="page-header-stat-label">Precision · RGB</div>
         </div>
         <div class="page-header-stat">
             <div class="page-header-stat-value">96,547</div>
             <div class="page-header-stat-label">Annotated Trees</div>
         </div>
     </div>
-    <div class="page-header-badge">YOLOv8s · RGB</div>
+    <div class="page-header-badge">YOLOv8s · RGB baseline</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -237,7 +237,7 @@ with st.sidebar:
             Tree Detection
         </div>
         <div style="font-size:0.72rem; color:#1a4a1a; margin-top:2px;">
-            NEUSTA · YOLOv8s · RGB
+            NEUSTA · YOLOv8s · RGB baseline
         </div>
     </div>
     <hr style="border:none; border-top:1px solid #1e3a1e; margin:8px 0 12px 0;">
@@ -278,10 +278,19 @@ with st.sidebar:
     # ── 2. Model performance ─────────────────────────────────────────────────
     st.markdown('<div class="sidebar-section">📊 Model Performance</div>', unsafe_allow_html=True)
     st.markdown("""
-    <div class="sb-metric"><span class="sb-metric-label">mAP@50</span><span class="sb-metric-value">0.439</span></div>
-    <div class="sb-metric"><span class="sb-metric-label">Recall</span><span class="sb-metric-value">77.3%</span></div>
-    <div class="sb-metric"><span class="sb-metric-label">Precision</span><span class="sb-metric-value">56.7%</span></div>
-    <div class="sb-metric"><span class="sb-metric-label">F1 Score</span><span class="sb-metric-value">0.654</span></div>
+    <div style="font-size:0.68rem;color:#2a5a2a;margin-bottom:6px;font-weight:600;">RGB Baseline</div>
+    <div class="sb-metric"><span class="sb-metric-label">mAP@50</span><span class="sb-metric-value">0.731</span></div>
+    <div class="sb-metric"><span class="sb-metric-label">Precision</span><span class="sb-metric-value">70.9%</span></div>
+    <div class="sb-metric"><span class="sb-metric-label">Recall</span><span class="sb-metric-value">67.2%</span></div>
+    <div class="sb-metric"><span class="sb-metric-label">F1 Score</span><span class="sb-metric-value">0.690</span></div>
+    <div style="font-size:0.68rem;color:#2a5a2a;margin:10px 0 6px 0;font-weight:600;">RGB+NIR Model</div>
+    <div class="sb-metric"><span class="sb-metric-label">mAP@50</span><span class="sb-metric-value">0.318</span></div>
+    <div class="sb-metric"><span class="sb-metric-label">Precision</span><span class="sb-metric-value">72.1% ↑</span></div>
+    <div class="sb-metric"><span class="sb-metric-label">Recall</span><span class="sb-metric-value">44.1%</span></div>
+    <div class="sb-metric"><span class="sb-metric-label">F1 Score</span><span class="sb-metric-value">0.548</span></div>
+    <div style="font-size:0.68rem;color:#1a4a1a;margin-top:6px;line-height:1.5;">
+        mAP gap at 50 epochs — NIR channel<br>needs 150+ epochs to fully converge
+    </div>
     """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -306,6 +315,13 @@ with st.sidebar:
     3. Upload 2 .npy → temporal comparison<br>
     4. Or pick a demo sample below<br>
     5. Adjust confidence threshold as needed
+    </div>
+    <div style="margin-top:10px;background:#b8d0b8;border:1px solid #7aa07a;border-radius:8px;
+                padding:8px 10px;font-size:0.7rem;color:#1a4a1a;line-height:1.6;">
+        <b>Detection:</b> RGB baseline (mAP@50=0.731)<br>
+        <b>Health:</b> NDVI per bounding box<br>
+        NIR-bright roofs may cause false positives —<br>
+        raise confidence threshold to reduce them
     </div>
     """, unsafe_allow_html=True)
 
